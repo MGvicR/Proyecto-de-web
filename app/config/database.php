@@ -26,6 +26,58 @@ function dbEnv(string $key, string $default = ''): string
     return (string) ($fileConfig[$key] ?? $default);
 }
 
+function createMysqlPdo(string $host, string $port, string $name, string $user, string $pass): PDO
+{
+    $dsn = "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4";
+    $baseOptions = [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ];
+
+    $useSsl = in_array(strtolower(dbEnv('DB_SSL', '')), ['1', 'true', 'yes'], true)
+        || str_contains($host, 'aivencloud.com');
+
+    if (!$useSsl) {
+        return new PDO($dsn, $user, $pass, $baseOptions);
+    }
+
+    $sslAttempts = [
+        [PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false],
+    ];
+
+    $caCandidates = array_unique(array_filter([
+        dbEnv('DB_SSL_CA', ''),
+        '/etc/ssl/certs/ca-certificates.crt',
+        '/etc/ssl/cert.pem',
+    ]));
+
+    foreach ($caCandidates as $caFile) {
+        if (!is_readable($caFile)) {
+            continue;
+        }
+
+        $sslAttempts[] = [
+            PDO::MYSQL_ATTR_SSL_CA => $caFile,
+            PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false,
+        ];
+        $sslAttempts[] = [
+            PDO::MYSQL_ATTR_SSL_CA => $caFile,
+            PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => true,
+        ];
+    }
+
+    $lastError = null;
+    foreach ($sslAttempts as $sslOptions) {
+        try {
+            return new PDO($dsn, $user, $pass, $baseOptions + $sslOptions);
+        } catch (PDOException $e) {
+            $lastError = $e;
+        }
+    }
+
+    throw $lastError ?? new PDOException('No se pudo conectar a MySQL con SSL');
+}
+
 function getDB(): PDO
 {
     static $pdo = null;
@@ -38,23 +90,7 @@ function getDB(): PDO
         $port = dbEnv('DB_PORT', '3306');
 
         try {
-            $dsn = "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4";
-            $pdoOptions = [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            ];
-
-            $useSsl = in_array(strtolower(dbEnv('DB_SSL', '')), ['1', 'true', 'yes'], true)
-                || str_contains($host, 'aivencloud.com');
-
-            if ($useSsl) {
-                $caFile = dbEnv('DB_SSL_CA', '/etc/ssl/certs/ca-certificates.crt');
-                if (is_readable($caFile)) {
-                    $pdoOptions[PDO::MYSQL_ATTR_SSL_CA] = $caFile;
-                }
-            }
-
-            $pdo = new PDO($dsn, $user, $pass, $pdoOptions);
+            $pdo = createMysqlPdo($host, $port, $name, $user, $pass);
         } catch (PDOException $e) {
             if (PHP_SAPI !== 'cli' && !headers_sent()) {
                 http_response_code(503);
