@@ -1,0 +1,8 @@
+.git
+.gitignore
+.vscode
+app/config/config.local.php
+public/uploads/propiedades/*
+!public/uploads/propiedades/.gitkeep
+scripts/sync-to-server.py
+*.zip
