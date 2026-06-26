@@ -18,6 +18,40 @@ function tablaExiste(PDO $pdo, string $tabla): bool
     return in_array($tabla, $tablas, true);
 }
 
+function ejecutarSchema(PDO $pdo, string $sql): void
+{
+    try {
+        $pdo->setAttribute(PDO::MYSQL_ATTR_MULTI_STATEMENTS, true);
+        $pdo->exec($sql);
+        while ($pdo->nextRowset()) {
+            // Vaciar result sets pendientes.
+        }
+
+        return;
+    } catch (PDOException) {
+        // Fallback: ejecutar sentencia por sentencia.
+    }
+
+    $buffer = '';
+    foreach (explode("\n", $sql) as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || str_starts_with($trimmed, '--')) {
+            continue;
+        }
+
+        $buffer .= $line . "\n";
+        if (!str_ends_with(rtrim($line), ';')) {
+            continue;
+        }
+
+        $statement = trim($buffer);
+        $buffer = '';
+        if ($statement !== '') {
+            $pdo->exec($statement);
+        }
+    }
+}
+
 try {
     $pdo = getDB();
 
@@ -38,12 +72,7 @@ try {
         exit(1);
     }
 
-    $pdo->setAttribute(PDO::MYSQL_ATTR_MULTI_STATEMENTS, true);
-    $pdo->exec($sql);
-
-    do {
-        // Consumir todos los result sets del script multi-statement.
-    } while ($pdo->nextRowset());
+    ejecutarSchema($pdo, $sql);
 
     if (!tablaExiste($pdo, 'propiedades')) {
         fwrite(STDERR, "Bootstrap DB: importación terminó pero falta la tabla propiedades.\n");
