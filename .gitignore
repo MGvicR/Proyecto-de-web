@@ -1,0 +1,3 @@
+/public/uploads/propiedades/*
+!/public/uploads/propiedades/.gitkeep
+/app/config/config.local.php

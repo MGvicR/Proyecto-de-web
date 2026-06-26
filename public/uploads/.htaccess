@@ -1,0 +1,10 @@
+Options -Indexes
+
+<IfModule mod_authz_core.c>
+    Require all granted
+</IfModule>
+
+# Evitar ejecutar scripts dentro de uploads
+<FilesMatch "\.(php|phtml|php3|php4|php5|phar)$">
+    Require all denied
+</FilesMatch>
