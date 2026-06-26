@@ -7,9 +7,9 @@ WORKDIR /var/www/html
 
 COPY . .
 
-RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/*.conf \
-    && sed -ri -e 's!/var/www/!/var/www/html/public/!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf \
-    && mkdir -p public/uploads/propiedades \
+COPY docker/apache-vhost.conf /etc/apache2/sites-available/000-default.conf
+
+RUN mkdir -p public/uploads/propiedades \
     && chown -R www-data:www-data public/uploads \
     && chmod -R 775 public/uploads
 
