@@ -2,13 +2,28 @@
 
 declare(strict_types=1);
 
-$localConfig = __DIR__ . '/config.local.php';
-if (file_exists($localConfig)) {
-    $config = require $localConfig;
-    foreach ($config as $key => $value) {
-        putenv("{$key}={$value}");
-        $_ENV[$key] = (string) $value;
+function dbEnv(string $key, string $default = ''): string
+{
+    if (isset($_ENV[$key]) && (string) $_ENV[$key] !== '') {
+        return (string) $_ENV[$key];
     }
+
+    if (isset($_SERVER[$key]) && (string) $_SERVER[$key] !== '') {
+        return (string) $_SERVER[$key];
+    }
+
+    $value = getenv($key);
+    if ($value !== false && $value !== '') {
+        return $value;
+    }
+
+    static $fileConfig = null;
+    if ($fileConfig === null) {
+        $localConfig = __DIR__ . '/config.local.php';
+        $fileConfig = file_exists($localConfig) ? require $localConfig : [];
+    }
+
+    return (string) ($fileConfig[$key] ?? $default);
 }
 
 function getDB(): PDO
@@ -16,17 +31,52 @@ function getDB(): PDO
     static $pdo = null;
 
     if ($pdo === null) {
-        $host = getenv('DB_HOST') ?: 'localhost';
-        $name = getenv('DB_NAME') ?: 'rentas_cdmx';
-        $user = getenv('DB_USER') ?: 'root';
-        $pass = getenv('DB_PASS') ?: '';
-        $port = getenv('DB_PORT') ?: '3306';
+        $host = dbEnv('DB_HOST', 'localhost');
+        $name = dbEnv('DB_NAME', 'rentas_cdmx');
+        $user = dbEnv('DB_USER', 'root');
+        $pass = dbEnv('DB_PASS', '');
+        $port = dbEnv('DB_PORT', '3306');
 
-        $dsn = "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4";
-        $pdo = new PDO($dsn, $user, $pass, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]);
+        try {
+            $dsn = "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4";
+            $pdoOptions = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ];
+
+            $useSsl = in_array(strtolower(dbEnv('DB_SSL', '')), ['1', 'true', 'yes'], true)
+                || str_contains($host, 'aivencloud.com');
+
+            if ($useSsl) {
+                $caFile = dbEnv('DB_SSL_CA', '/etc/ssl/certs/ca-certificates.crt');
+                if (is_readable($caFile)) {
+                    $pdoOptions[PDO::MYSQL_ATTR_SSL_CA] = $caFile;
+                }
+            }
+
+            $pdo = new PDO($dsn, $user, $pass, $pdoOptions);
+        } catch (PDOException $e) {
+            if (PHP_SAPI !== 'cli' && !headers_sent()) {
+                http_response_code(503);
+                header('Content-Type: text/html; charset=UTF-8');
+                $enRender = dbEnv('RENDER', '') !== '' || dbEnv('RENDER_SERVICE_ID', '') !== '';
+                echo '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">';
+                echo '<title>Base de datos no disponible</title></head><body>';
+                echo '<h1>No se pudo conectar a la base de datos</h1>';
+                if ($enRender) {
+                    echo '<p>En el panel de <strong>Render</strong>, ve a <em>Environment</em> y define:</p>';
+                    echo '<ul><li>DB_HOST</li><li>DB_NAME</li><li>DB_USER</li><li>DB_PASS</li><li>DB_PORT (3306)</li></ul>';
+                    echo '<p>Render no incluye MySQL. Necesitas una base MySQL externa (Aiven, Railway, etc.) e importar <code>sql/schema.sql</code>.</p>';
+                    echo '<p>La base del profesor (tecweb) solo funciona en ese servidor, no desde Render.</p>';
+                } else {
+                    echo '<p>Revisa <code>app/config/config.local.php</code> o las variables DB_* del entorno.</p>';
+                }
+                echo '</body></html>';
+                exit;
+            }
+
+            throw $e;
+        }
 
         ensurePropiedadFotosSchema($pdo);
         ensureAdminEmail($pdo);

@@ -12,17 +12,34 @@ define('UPLOAD_PATH', PUBLIC_PATH . '/uploads/propiedades');
 
 $documentRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
 $publicPath = realpath(PUBLIC_PATH);
+$baseUrl = '';
 
 if ($documentRoot !== false && $publicPath !== false) {
     $documentRoot = str_replace('\\', '/', $documentRoot);
     $publicPath = str_replace('\\', '/', $publicPath);
-    $baseUrl = str_starts_with($publicPath, $documentRoot)
-        ? substr($publicPath, strlen($documentRoot))
-        : '';
-    define('BASE_URL', rtrim($baseUrl, '/'));
-} else {
-    define('BASE_URL', '');
+
+    if (str_starts_with($publicPath, $documentRoot)) {
+        $baseUrl = rtrim(substr($publicPath, strlen($documentRoot)), '/');
+    }
+
+    // En hosting compartido Apache suele usar public/ como DocumentRoot;
+    // ahí la ruta relativa queda vacía y hay que deducirla desde SCRIPT_NAME.
+    if ($baseUrl === '') {
+        $scriptFile = realpath($_SERVER['SCRIPT_FILENAME'] ?? '');
+        if ($scriptFile !== false) {
+            $scriptFile = str_replace('\\', '/', $scriptFile);
+            if (str_starts_with($scriptFile, $publicPath)) {
+                $relativeScript = substr($scriptFile, strlen($publicPath));
+                $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
+                if ($relativeScript !== '' && str_ends_with($scriptName, $relativeScript)) {
+                    $baseUrl = rtrim(substr($scriptName, 0, -strlen($relativeScript)), '/');
+                }
+            }
+        }
+    }
 }
+
+define('BASE_URL', $baseUrl);
 
 require_once BASE_PATH . '/app/config/database.php';
 require_once BASE_PATH . '/app/helpers/sanitize.php';
